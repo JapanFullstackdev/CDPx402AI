@@ -1,0 +1,1170 @@
+# AI DeFi Agent
+
+**AI × Web3 / Autonomous Agent / x402 Payment / CDP Wallet**
+
+AI DeFi Agent is a portfolio project that explores how an AI Agent can **autonomously discover and purchase Web3 services using cryptocurrency payments**.
+
+Instead of building a conventional chatbot that only reads blockchain data, the project focuses on a more practical Agentic AI architecture:
+
+> **The AI determines what information it needs, selects an appropriate tool, verifies that the requested payment is within a predefined policy, uses a CDP-managed wallet to authorize an x402 payment, and retrieves the paid Web3 data.**
+
+The initial implementation uses a cryptocurrency market-data service as the first paid Web3 service. The architecture is intentionally designed so that additional services such as DeFi pool analytics, token-risk analysis, volatility analysis, and transaction simulation can be added later.
+
+---
+
+## 1. Project Goal
+
+A conventional LLM application generally works like this:
+
+```text
+User
+ ↓
+LLM
+ ↓
+Answer
+```
+
+This model becomes insufficient when an AI Agent needs to perform real-world actions.
+
+For example, a future DeFi research request might be:
+
+> 「ETH/USDCの流動性プールを調査し、リスクと利回りを比較してください。」
+
+To answer this properly, an Agent may need to obtain:
+
+* current market data
+* pool liquidity
+* TVL
+* trading volume
+* historical volatility
+* token risk information
+* smart-contract analysis
+
+Some of these services may be paid services.
+
+This creates a new problem:
+
+```text
+AI Agent
+   ↓
+Needs external service
+   ↓
+How does the Agent pay for it?
+```
+
+This project investigates that problem using **x402 + CDP Wallet + Coinbase AgentKit**.
+
+---
+
+# 2. Core Concept
+
+The fundamental concept is:
+
+> **Machine-to-machine payment for AI Agents**
+
+The Agent is not given unlimited control over money.
+
+Instead:
+
+```text
+LLM
+ ↓
+Tool selection
+ ↓
+Application-level spending policy
+ ↓
+AgentKit x402 action
+ ↓
+CDP-managed EVM wallet
+ ↓
+USDC payment
+ ↓
+Paid HTTP service
+ ↓
+Result returned to Agent
+```
+
+The LLM decides **what it needs**.
+
+The deterministic application layer decides **whether it is allowed to pay**.
+
+The wallet infrastructure handles **cryptographic authorization**.
+
+This separation is one of the main architectural principles of the project.
+
+---
+
+# 3. Architecture
+
+```text
+                              ┌───────────────┐
+                              │     User      │
+                              └───────┬───────┘
+                                      │
+                                      ▼
+                            ┌──────────────────┐
+                            │  Strands Agent   │
+                            │      + LLM       │
+                            └────────┬─────────┘
+                                     │
+                              Tool selection
+                                     │
+                                     ▼
+                           ┌───────────────────┐
+                           │ get_market_price()│
+                           └─────────┬─────────┘
+                                     │
+                                     ▼
+                           ┌───────────────────┐
+                           │ Spending Policy   │
+                           └─────────┬─────────┘
+                                     │
+                                authorized
+                                     │
+                                     ▼
+                         ┌───────────────────────┐
+                         │   Coinbase AgentKit   │
+                         │    x402 Action        │
+                         └──────────┬────────────┘
+                                    │
+                                    ▼
+                         ┌───────────────────────┐
+                         │    CDP EVM Wallet     │
+                         │     Base Sepolia      │
+                         └──────────┬────────────┘
+                                    │
+                                  USDC
+                                    │
+                                    ▼
+                         ┌───────────────────────┐
+                         │    x402 Facilitator   │
+                         └──────────┬────────────┘
+                                    │
+                                    ▼
+                         ┌───────────────────────┐
+                         │      FastAPI API      │
+                         │   /market-price       │
+                         └──────────┬────────────┘
+                                    │
+                                    ▼
+                         ┌───────────────────────┐
+                         │      CoinGecko        │
+                         │    Market Data API    │
+                         └───────────────────────┘
+```
+
+---
+
+# 4. Why These Technologies?
+
+## Python
+
+Python was selected because it has strong ecosystems for:
+
+* LLM applications
+* Agent frameworks
+* API development
+* Web3
+* data processing
+
+It also makes the project easy to evolve from a prototype into a more sophisticated AI workflow.
+
+---
+
+## Strands Agents
+
+Strands is used as the **Agent orchestration layer**.
+
+It is important to distinguish the LLM from the Agent framework.
+
+```text
+LLM
+ ↓
+reasoning
+
+Strands Agent
+ ↓
+LLM + tools + agent loop + context
+```
+
+The LLM decides what it needs to accomplish the user's request, while Strands manages the interaction between the model and registered tools.
+
+For example:
+
+```python
+@tool
+async def get_market_price(symbol: str):
+    ...
+```
+
+The LLM can decide to invoke this tool when current market information is required.
+
+### Why use an Agent framework?
+
+We could hard-code:
+
+```text
+1. Call market API
+2. Get result
+3. Send result to LLM
+4. Return answer
+```
+
+However, that approach becomes difficult to extend when the Agent needs multiple services.
+
+The intended architecture is instead:
+
+```text
+User request
+      ↓
+LLM
+      ↓
+Determine required information
+      ↓
+Select tools dynamically
+      ↓
+Execute tools
+      ↓
+Evaluate results
+      ↓
+Select additional tools if necessary
+      ↓
+Final response
+```
+
+This makes the system suitable for future multi-step DeFi research workflows.
+
+---
+
+# 5. Coinbase AgentKit
+
+AgentKit provides the blockchain-facing capability of the Agent.
+
+Its role in this project is different from Strands:
+
+| Component  | Responsibility                   |
+| ---------- | -------------------------------- |
+| LLM        | Reasoning                        |
+| Strands    | Agent orchestration              |
+| AgentKit   | Blockchain / wallet capabilities |
+| CDP Wallet | Wallet management and signing    |
+| x402       | HTTP payment protocol            |
+| FastAPI    | Our paid service                 |
+| CoinGecko  | External market data             |
+
+The important design decision is to **keep these responsibilities separated**.
+
+This means we can later replace Strands with another Agent framework without rewriting the underlying payment infrastructure.
+
+---
+
+# 6. CDP-managed EVM Wallet
+
+The Agent uses a **Coinbase Developer Platform managed EVM wallet** instead of embedding a private key in the application.
+
+The wallet is configured through:
+
+```text
+CDP_API_KEY_ID
+CDP_API_KEY_SECRET
+CDP_WALLET_SECRET
+NETWORK_ID
+```
+
+The application never exposes a private key to the LLM.
+
+### Why?
+
+Giving an LLM direct access to a private key creates an unnecessarily large security boundary.
+
+For example:
+
+```text
+LLM
+ ↓
+Private key
+ ↓
+Unlimited blockchain access
+```
+
+would mean a prompt-injection or agent error could potentially result in an unwanted transaction.
+
+This project instead uses:
+
+```text
+LLM
+ ↓
+Tool
+ ↓
+Policy
+ ↓
+AgentKit
+ ↓
+CDP Wallet
+```
+
+The LLM determines intent, but the wallet remains an infrastructure component.
+
+---
+
+# 7. Why x402?
+
+x402 uses the HTTP `402 Payment Required` mechanism to enable payment for an HTTP resource.
+
+Our API behaves approximately like this:
+
+### Step 1 — Agent requests the resource
+
+```http
+GET /market-price?symbol=ETH
+```
+
+### Step 2 — API requests payment
+
+```http
+HTTP/1.1 402 Payment Required
+```
+
+### Step 3 — AgentKit / x402 creates the payment
+
+```text
+AgentKit
+ ↓
+CDP Wallet
+ ↓
+USDC authorization
+```
+
+### Step 4 — Request is retried with payment information
+
+```text
+HTTP request
++
+x402 payment
+```
+
+### Step 5 — Service returns the resource
+
+```http
+HTTP/1.1 200 OK
+```
+
+This creates a simple model for **machine-to-machine payments**.
+
+The Agent does not need a conventional subscription workflow for every service it consumes.
+
+---
+
+# 8. Why USDC?
+
+The initial test environment uses USDC because the Agent is purchasing API services rather than speculating on an asset.
+
+For example:
+
+```text
+Market API request: $0.001
+```
+
+Using a stable-value token makes the payment amount easier to reason about compared with a volatile native asset.
+
+During development, the project uses testnet assets only.
+
+---
+
+# 9. Why Base Sepolia?
+
+The development network is:
+
+```text
+Base Sepolia
+CAIP-2: eip155:84532
+```
+
+The main reason is safety.
+
+We want to test:
+
+* Wallet creation
+* Signing
+* x402 payment
+* HTTP 402 handling
+* settlement
+* Agent behaviour
+
+without using production funds.
+
+The architecture is designed so that the network can be changed later without redesigning the Agent itself.
+
+---
+
+# 10. Market Data Service
+
+The first paid service is:
+
+```http
+GET /market-price?symbol=ETH
+```
+
+The API returns:
+
+```json
+{
+  "symbol": "ETH",
+  "price_usd": 4321.50,
+  "source": "CoinGecko",
+  "timestamp": "..."
+}
+```
+
+The actual value comes from CoinGecko.
+
+However, the Agent does **not** call CoinGecko directly.
+
+The architecture is:
+
+```text
+Agent
+ ↓
+x402
+ ↓
+Our Market API
+ ↓
+CoinGecko
+```
+
+### Why introduce our own API?
+
+The purpose of this project is not simply to demonstrate a price lookup.
+
+The interesting problem is:
+
+> **Can an AI Agent purchase a Web3 service programmatically?**
+
+Therefore, the project creates its own paid API boundary.
+
+CoinGecko acts as the upstream data provider.
+
+Our API acts as the **service provider**.
+
+The Agent acts as the **service consumer**.
+
+---
+
+# 11. Spending Policy
+
+Giving an Agent the ability to spend money requires deterministic controls.
+
+For example:
+
+```text
+Maximum payment per request: $0.01
+Maximum session budget:      $0.10
+```
+
+The policy lives outside the LLM.
+
+```text
+LLM
+ ↓
+"I need market data"
+ ↓
+Tool
+ ↓
+Spending Policy
+ ├── Is the amount allowed?
+ ├── Is the session budget available?
+ └── Is the service permitted?
+ ↓
+Allow / Reject
+```
+
+### Why not simply put the limit in the prompt?
+
+A prompt such as:
+
+> "Never spend more than $0.01."
+
+is useful as guidance, but it should not be treated as a security boundary.
+
+LLMs are probabilistic systems.
+
+A financial limit should therefore be enforced by deterministic code.
+
+This project deliberately places the financial constraint outside the LLM.
+
+---
+
+# 12. Service Allowlist
+
+The x402 client is not allowed to call arbitrary URLs.
+
+The application explicitly registers the market-data service.
+
+Conceptually:
+
+```text
+Allowed:
+http://127.0.0.1:8000/
+
+Not allowed:
+arbitrary external URL
+```
+
+This prevents a tool invocation from becoming a generic HTTP client with unrestricted network access.
+
+In a production system, this could be extended to:
+
+* service identity
+* domain allowlists
+* contract allowlists
+* chain allowlists
+* token allowlists
+* risk scoring
+
+---
+
+# 13. Tool Design
+
+The project uses application-owned tools rather than giving the LLM direct access to infrastructure.
+
+For example:
+
+```python
+@tool
+async def get_market_price(symbol: str):
+    ...
+```
+
+The tool is responsible for:
+
+1. validating input
+2. checking the spending policy
+3. invoking the permitted x402 service
+4. returning the result to the Agent
+
+This creates a clear boundary:
+
+```text
+LLM
+ ↓
+Tool
+ ↓
+Application logic
+ ↓
+Infrastructure
+```
+
+rather than:
+
+```text
+LLM
+ ↓
+Internet
+```
+
+---
+
+# 14. Buyer / Seller Separation
+
+One important design decision is that the project contains **two sides**.
+
+## Buyer
+
+The AI Agent:
+
+```text
+agent/
+```
+
+Responsibilities:
+
+* LLM
+* tools
+* wallet
+* x402 payment
+* spending policies
+
+## Seller
+
+The market service:
+
+```text
+server/
+```
+
+Responsibilities:
+
+* HTTP API
+* x402 payment requirement
+* market-data retrieval
+
+The relationship is:
+
+```text
+                 USDC
+Buyer Agent ───────────────> Market API
+     │                          │
+     │                          │
+     └────── x402 ──────────────┘
+```
+
+This separation makes the x402 use case easier to understand and allows the market service to eventually become an independently deployable service.
+
+---
+
+# 15. Project Structure
+
+```text
+ai-defi-agent/
+│
+├── agent/
+│   ├── agent.py
+│   │
+│   ├── agentkit.py
+│   │
+│   ├── wallet/
+│   │   └── cdp_wallet.py
+│   │
+│   ├── tools/
+│   │   └── market_data.py
+│   │
+│   └── policies/
+│       └── spending.py
+│
+├── server/
+│   └── market_api.py
+│
+├── tests/
+│   └── test_spending.py
+│
+├── .env.example
+├── .gitignore
+├── requirements.txt
+├── pyproject.toml
+└── README.md
+```
+
+### `agent/agent.py`
+
+Agent orchestration.
+
+Responsibilities:
+
+* LLM configuration
+* tool registration
+* system instructions
+* user interaction
+
+### `agent/agentkit.py`
+
+Coinbase infrastructure.
+
+Responsibilities:
+
+* CDP wallet provider
+* x402 Action Provider
+* service allowlist
+* x402 payment limit
+
+### `agent/wallet/cdp_wallet.py`
+
+CDP wallet configuration.
+
+Responsibilities:
+
+* CDP credentials
+* network selection
+* wallet creation/loading
+
+### `agent/tools/market_data.py`
+
+Business-level Agent Tool.
+
+Responsibilities:
+
+* symbol validation
+* spending authorization
+* paid market-data request
+
+### `agent/policies/spending.py`
+
+Financial policy.
+
+Responsibilities:
+
+* per-request limit
+* session budget
+
+### `server/market_api.py`
+
+Paid service.
+
+Responsibilities:
+
+* FastAPI endpoint
+* x402 middleware
+* CoinGecko integration
+* response validation
+
+---
+
+# 16. Setup
+
+Requirements:
+
+* Python 3.10+
+* Coinbase Developer Platform credentials
+* OpenAI API key
+* Base Sepolia testnet assets
+* Seller wallet address
+* CoinGecko API access
+
+Create a virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Install dependencies:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+Create environment configuration:
+
+```bash
+cp .env.example .env
+```
+
+Configure:
+
+```env
+OPENAI_API_KEY=...
+OPENAI_MODEL_ID=gpt-4o-mini
+
+CDP_API_KEY_ID=...
+CDP_API_KEY_SECRET=...
+CDP_WALLET_SECRET=...
+NETWORK_ID=base-sepolia
+
+X402_PAY_TO=0x...
+
+MARKET_API_URL=http://127.0.0.1:8000
+
+MARKET_PRICE_API_COST_USD=0.001
+
+COINGECKO_API_KEY=...
+```
+
+Never commit `.env`.
+
+---
+
+# 17. Run the Seller
+
+Start the API:
+
+```bash
+python -m uvicorn server.market_api:app --reload
+```
+
+Test it:
+
+```bash
+curl -i "http://127.0.0.1:8000/market-price?symbol=ETH"
+```
+
+Because the endpoint is x402-protected, an unpaid request should return:
+
+```text
+HTTP 402 Payment Required
+```
+
+---
+
+# 18. Run the AI Agent
+
+In a second terminal:
+
+```bash
+python agent/agent.py
+```
+
+Example:
+
+```text
+You> What is the current ETH market price?
+```
+
+The intended execution flow is:
+
+```text
+User
+ ↓
+LLM
+ ↓
+get_market_price()
+ ↓
+Spending Policy
+ ↓
+AgentKit
+ ↓
+x402
+ ↓
+CDP Wallet
+ ↓
+USDC
+ ↓
+FastAPI Market API
+ ↓
+CoinGecko
+ ↓
+Market Data
+ ↓
+LLM
+ ↓
+User
+```
+
+---
+
+# 19. Why the project is not just a Coinbase Example
+
+The Coinbase AgentKit repository was an important learning reference, but this project is not intended to be a direct copy of an example.
+
+The original learning path focused on understanding:
+
+* AgentKit
+* x402
+* Wallet operations
+* Agent frameworks
+
+The project then adds its own architecture around those technologies:
+
+```text
+Coinbase examples
+      ↓
+Technology understanding
+      ↓
+Own service model
+      ↓
+Own spending policy
+      ↓
+Own API
+      ↓
+Own buyer/seller architecture
+      ↓
+Own security boundaries
+```
+
+The important engineering work is not the act of calling an SDK.
+
+It is designing **how the SDKs work together safely**.
+
+---
+
+# 20. Technical Challenges
+
+The main technical challenges addressed in this project are:
+
+### 1. Separating AI reasoning from financial execution
+
+The LLM decides what information is needed, but the application determines whether payment is allowed.
+
+### 2. Connecting an AI Agent to a blockchain wallet
+
+The Agent needs a wallet capability without exposing private keys to the LLM.
+
+### 3. Handling HTTP-level crypto payments
+
+The x402 flow must transform:
+
+```text
+Normal HTTP request
+```
+
+into:
+
+```text
+HTTP 402
+ → payment authorization
+ → retry
+ → resource
+```
+
+### 4. Restricting autonomous spending
+
+An autonomous Agent should not have unlimited authority.
+
+The system therefore uses:
+
+* per-payment limits
+* session budget
+* service allowlists
+* testnet restrictions
+
+### 5. Keeping framework dependencies replaceable
+
+The core Web3/payment layer is kept separate from the Agent orchestration layer.
+
+This enables future migration:
+
+```text
+Strands
+   ↓
+LangChain
+   ↓
+LangGraph
+   ↓
+other Agent framework
+```
+
+without redesigning the x402/payment architecture.
+
+---
+
+# 21. Current Limitations
+
+This is a portfolio/technical research project and is not intended to be a production DeFi investment system.
+
+Current limitations include:
+
+* single primary market-data tool
+* Base Sepolia environment
+* CoinGecko dependency
+* simplified spending policy
+* limited service discovery
+* no autonomous DeFi transaction execution
+* no multi-agent coordination
+
+The current objective is to validate the fundamental architecture:
+
+> **AI Agent + Tool + Policy + Wallet + x402 + Web3 Service**
+
+---
+
+# 22. Planned Extensions
+
+The next stage is to replace the single market-price service with multiple paid Web3 services.
+
+For example:
+
+```text
+                AI DeFi Research Agent
+                         │
+        ┌────────────────┼────────────────┐
+        │                │                │
+        ▼                ▼                ▼
+   Market Data      Pool Metrics      Token Risk
+     $0.001            $0.003           $0.005
+        │                │                │
+        └────────────────┼────────────────┘
+                         ▼
+                   Final Analysis
+```
+
+Possible APIs:
+
+```http
+GET /market-price
+GET /market-history
+GET /pool-metrics
+GET /token-risk
+GET /volatility
+GET /transaction-simulation
+```
+
+The Agent could receive a budget:
+
+```text
+Research budget = $0.10
+```
+
+and decide which external services provide enough value to justify their cost.
+
+---
+
+# 23. Planned LangChain / LangGraph Migration
+
+The initial implementation uses Strands Agents as the Agent orchestration framework.
+
+The next development stage is to evaluate **LangChain / LangGraph**.
+
+The objective is not to rewrite the entire system.
+
+The desired architecture is:
+
+```text
+                  Agent Framework
+                 /              \
+          Strands                LangGraph
+             │                       │
+             └──────────┬────────────┘
+                        │
+                    Same Tools
+                        │
+                     Policy
+                        │
+                    AgentKit
+                        │
+                      x402
+                        │
+                   CDP Wallet
+```
+
+The important design goal is to make:
+
+> **AI orchestration replaceable**
+
+while keeping:
+
+> **Web3 payment and security infrastructure reusable**
+
+This is useful because different Agent frameworks provide different approaches to:
+
+* tool calling
+* state management
+* workflows
+* memory
+* multi-agent orchestration
+
+For a more complex DeFi research workflow, LangGraph may be especially useful because it provides explicit stateful workflows and graph-based orchestration.
+
+---
+
+# 24. Interview Talking Points
+
+### 「このプロジェクトでは何を作ったのですか？」
+
+> AI Agentが必要なWeb3データサービスを自律的に利用できる仕組みを検証しました。AgentはToolを通してx402で有料APIを利用し、Coinbase AgentKitとCDP-managed Walletを使ってUSDC決済を行います。また、LLMに直接資産操作をさせず、アプリケーション側にSpending Policyを設けています。
+
+### 「なぜx402を使ったのですか？」
+
+> Agentが外部サービスを利用する場合、従来のAPI KeyやSubscriptionだけではなく、必要なサービスをその場で購入できる決済モデルが必要だと考えたためです。x402を利用することでHTTP APIと暗号資産決済を組み合わせられます。
+
+### 「なぜLLMにWalletを直接渡さないのですか？」
+
+> LLMは確率的な推論コンポーネントなので、資産管理とはSecurity Boundaryを分離すべきだと考えました。そのためWalletはCDP側で管理し、さらにSpending Policyを決定論的なアプリケーションコードとして実装しています。
+
+### 「なぜCoinGeckoをAgentから直接呼ばないのですか？」
+
+> このプロジェクトの主目的は価格取得ではなく、AI Agentによるサービス購入の仕組みを検証することです。そのためCoinGeckoはデータプロバイダー、自作FastAPIはx402対応の有料サービスとして分離しています。
+
+### 「AgentKitとStrandsの違いは何ですか？」
+
+> StrandsはLLMとToolを組み合わせてAgentをオーケストレーションする層です。一方、AgentKitはWalletやBlockchain操作など、AgentにWeb3のCapabilityを提供する層です。責務が異なるため分離しています。
+
+---
+
+# 25. Learning / Implementation Approach
+
+本プロジェクトでは、Coinbase AgentKitやStrandsの公式Examples・Documentationを学習材料として利用しました。
+
+ただし、サンプルコードをそのままCloneして終わるのではなく、
+
+```text
+Example
+ ↓
+Understand architecture
+ ↓
+Identify reusable components
+ ↓
+Design own use case
+ ↓
+Build own API
+ ↓
+Add spending controls
+ ↓
+Add wallet/payment boundary
+ ↓
+Test the complete flow
+```
+
+という形で発展させています。
+
+このプロセスを通じて、
+
+* AI Agent architecture
+* Web3 wallet architecture
+* HTTP payment protocol
+* EVM signing
+* API design
+* security boundaries
+* deterministic policy design
+
+について実装ベースで理解することを目的としています。
+
+---
+
+# 26. Skills Demonstrated
+
+```text
+AI / Agent
+├── LLM
+├── Tool Calling
+├── Agent Orchestration
+└── Agent Framework Abstraction
+
+Blockchain
+├── Ethereum / EVM
+├── Base
+├── Wallet
+├── USDC
+└── On-chain payment
+
+Web3 Infrastructure
+├── Coinbase AgentKit
+├── CDP Wallet
+└── x402
+
+Backend
+├── Python
+├── FastAPI
+├── HTTP
+├── Async I/O
+└── External API integration
+
+Security
+├── Spending limits
+├── Service allowlist
+├── Wallet isolation
+├── Secret management
+└── Testnet-first development
+```
+
+---
+
+# 27. Official References
+
+### Coinbase AgentKit
+
+https://github.com/coinbase/agentkit
+
+https://pypi.org/project/coinbase-agentkit/
+
+### AgentKit × Strands
+
+https://pypi.org/project/coinbase-agentkit-strands-agents/
+
+### x402
+
+https://docs.x402.org/
+
+https://github.com/x402-foundation/x402
+
+### Strands Agents
+
+https://strandsagents.com/
+
+### CoinGecko API
+
+https://docs.coingecko.com/
+
+---
+
+## Keywords
+
+`AI Agent` `LLM` `Agentic AI` `Web3` `Blockchain` `Ethereum` `EVM` `Base` `USDC` `x402` `Coinbase AgentKit` `CDP Wallet` `Strands Agents` `FastAPI` `Python` `CoinGecko` `Tool Calling` `DeFi` `Machine-to-Machine Payment` `Autonomous Agent`
+
