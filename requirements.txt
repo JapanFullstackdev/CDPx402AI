@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+httpx
+pydantic
+python-dotenv
+requests
+strands-agents
+strands-agents[openai]
+coinbase-agentkit==0.7.4
+coinbase-agentkit-strands-agents==0.2.0
+x402
+pytest
